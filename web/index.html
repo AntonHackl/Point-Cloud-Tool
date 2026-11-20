@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>Point Cloud Tool</title>
+</head>
+<body>
+  <header class="topbar">
+    <h1>Point Cloud Tool</h1>
+    <button id="open" type="button" class="primary">Open file</button>
+    <input id="file" type="file" accept=".las,.laz" hidden>
+  </header>
+  <main class="workspace">
+    <section id="viewport" aria-label="3D point cloud">
+      <div id="empty" class="empty">
+        <p>Open a LAS or LAZ file to inspect its points.</p>
+      </div>
+      <button id="reset" class="reset" type="button" disabled>Reset view</button>
+      <div id="status" class="status" role="status"></div>
+    </section>
+    <aside aria-label="Plot controls">
+      <section>
+        <h2>Point cloud</h2>
+        <p id="dataset" class="dataset">No file open</p>
+        <p id="point-count" class="muted"></p>
+      </section>
+      <section>
+        <h2>Display</h2>
+        <label for="color">Color by</label>
+        <select id="color" disabled></select>
+        <div id="scale-control" hidden>
+          <label for="scale">Color scale</label>
+          <select id="scale">
+            <option value="gradient">Gradient</option>
+            <option value="categories">Categories</option>
+          </select>
+        </div>
+      </section>
+      <section>
+        <h2>Instance selection</h2>
+        <label for="instance-field">Instance field</label>
+        <select id="instance-field" disabled></select>
+        <div class="selection" aria-live="polite">
+          <p id="selected-label">No instance selected</p>
+          <p id="selected-count" class="muted"></p>
+        </div>
+      </section>
+    </aside>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
