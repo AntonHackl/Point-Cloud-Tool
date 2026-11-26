@@ -1,4 +1,5 @@
 import './style.css'
+import { Lasso } from './lasso'
 import { Viewport, type Bounds } from './viewport'
 
 type Field = { id: number; name: string; categorical: boolean }
@@ -12,21 +13,61 @@ const reset = element<HTMLButtonElement>('reset')
 const color = element<HTMLSelectElement>('color')
 const scale = element<HTMLSelectElement>('scale')
 const instanceField = element<HTMLSelectElement>('instance-field')
+const lassoButton = element<HTMLButtonElement>('lasso')
+const clearLassoButton = element<HTMLButtonElement>('clear-lasso')
+const finishLassoButton = element<HTMLButtonElement>('finish-lasso')
+const lassoTree = element<HTMLInputElement>('lasso-tree')
+const pivotCrosshair = element('pivot-crosshair')
+const lassoShortcuts = new Map<string, HTMLButtonElement | HTMLInputElement>([
+  ['x', lassoButton], ['c', clearLassoButton], ['a', lassoTree],
+])
 const viewportContainer = element('viewport')
 const counts = new Intl.NumberFormat()
 
 let cloud: Cloud | undefined
 let viewport: Viewport
+let lasso: Lasso
+let lassoActive = false
+let lassoHasOutline = false
 let opening = false
 let activeField: number | undefined
+let activeGroup = 0
 let colorRequest = 0
 let groupRequest = 0
 let pickRequest = 0
 
 try {
-  viewport = new Viewport(viewportContainer, (x, y) => { void selectPoint(x, y) })
+  viewport = new Viewport(viewportContainer, element('frame-rate'), (x, y) => { void selectPoint(x, y) })
+  lasso = new Lasso(viewportContainer, (path, draftVertexCount) => {
+    lassoHasOutline = path.length > 0
+    finishLassoButton.disabled = (draftVertexCount ?? 0) < 3
+    if (draftVertexCount === undefined) {
+      showLassoCount(viewport.previewLasso(path, lassoTree.checked))
+    } else if (draftVertexCount === 1) {
+      showLassoCount(viewport.previewLasso([], false))
+    }
+  })
+  lassoButton.addEventListener('click', () => setLassoActive(!lassoActive))
+  clearLassoButton.addEventListener('click', clearLasso)
+  finishLassoButton.addEventListener('click', () => lasso.finish())
+  lassoTree.addEventListener('change', () => showLassoCount(viewport.filterLasso(lassoTree.checked)))
+  window.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && lassoActive) {
+      setLassoActive(false)
+      return
+    }
+    if (event.defaultPrevented || event.repeat || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
+    if (event.target instanceof HTMLElement && event.target.closest('input:not([type="checkbox"]), select, textarea, [contenteditable]')) return
+    const control = lassoShortcuts.get(event.key.toLowerCase())
+    if (!control || control.disabled) return
+    event.preventDefault()
+    control.click()
+  })
   open.addEventListener('click', () => input.click())
-  reset.addEventListener('click', () => viewport.reset())
+  reset.addEventListener('click', () => {
+    lasso.cancelDraft()
+    viewport.reset()
+  })
   input.addEventListener('change', () => {
     const file = input.files?.[0]
     input.value = ''
@@ -40,6 +81,10 @@ try {
   })
   scale.addEventListener('change', () => { void updateColors() })
   instanceField.addEventListener('change', () => { void updateInstanceField() })
+  void loadCloud('Loading the default plot…', async () => {
+    const response = await request('/api/clouds/default')
+    return response.status === 204 ? undefined : await response.json()
+  })
 } catch {
   open.disabled = true
   status('WebGL 2 is unavailable. Open the viewer in a browser with hardware acceleration enabled.', true)
@@ -73,6 +118,32 @@ function report(error: unknown) {
 function controls() {
   open.disabled = opening
   reset.disabled = color.disabled = scale.disabled = instanceField.disabled = !cloud || opening
+  lassoButton.disabled = !cloud || opening
+  pivotCrosshair.hidden = !cloud || opening || lassoActive
+  lassoTree.disabled = !activeGroup || opening
+  clearLassoButton.disabled = !lassoHasOutline || opening
+}
+
+function setLassoActive(active: boolean) {
+  if (active === lassoActive) return
+  lassoActive = active
+  finishLassoButton.hidden = !active
+  pivotCrosshair.hidden = !cloud || opening || active
+  if (active) pickRequest++
+  lassoButton.setAttribute('aria-pressed', String(active))
+  lasso.setActive(active)
+  viewport.setLassoActive(active)
+}
+
+function showLassoCount(count: number) {
+  element('lasso-count').textContent = count > 0 ? counts.format(count) + ' points selected' : 'No points selected'
+  clearLassoButton.disabled = !lassoHasOutline || opening
+}
+
+function clearLasso() {
+  lasso.cancelDraft()
+  lassoHasOutline = false
+  showLassoCount(viewport.previewLasso([], false))
 }
 
 function cloudUrl(dataset: Cloud) {
@@ -80,31 +151,50 @@ function cloudUrl(dataset: Cloud) {
 }
 
 function clearSelection(label = 'No instance selected') {
+  activeGroup = 0
+  lassoTree.checked = false
+  lassoTree.disabled = true
+  clearLasso()
   viewport.highlight(0)
   element('selected-label').textContent = label
   element('selected-count').textContent = ''
 }
 
-async function openFile(file: File) {
-  if (opening) return
-  const start = performance.now()
-  opening = true
-  pickRequest++
-  controls()
-  status('Opening ' + file.name + '…')
-  try {
+function openFile(file: File) {
+  return loadCloud('Opening ' + file.name + '…', async () => {
     const form = new FormData()
     form.set('file', file)
     const response = await request('/api/clouds', { method: 'POST', body: form })
-    const dataset: Cloud = await response.json()
+    return response.json()
+  })
+}
+
+async function loadCloud(message: string, getDataset: () => Promise<Cloud | undefined>) {
+  if (opening) return
+  const start = performance.now()
+  opening = true
+  setLassoActive(false)
+  pickRequest++
+  controls()
+  status(message)
+  try {
+    const dataset = await getDataset()
+    if (!dataset) {
+      status()
+      return
+    }
     const url = cloudUrl(dataset)
-    const [positions, rgb] = await Promise.all([
+    const intensity = dataset.fields.find(field => field.name.toLowerCase() === 'intensity')
+    const colorUrl = intensity
+      ? url + '/fields/' + intensity.id + '/colors?categorical=false'
+      : dataset.hasRgb ? url + '/rgb' : undefined
+    const [positions, colors] = await Promise.all([
       buffer(url + '/positions', dataset.pointCount * 12),
-      dataset.hasRgb ? buffer(url + '/rgb', dataset.pointCount * 3) : undefined,
+      colorUrl ? buffer(colorUrl, dataset.pointCount * 3) : undefined,
     ])
     colorRequest++
     groupRequest++
-    viewport.setCloud(new Float32Array(positions), dataset.bounds, rgb && new Uint8Array(rgb))
+    viewport.setCloud(new Float32Array(positions), dataset.bounds, colors && new Uint8Array(colors))
     cloud = dataset
     activeField = undefined
     color.replaceChildren(new Option('Solid grey', 'grey'))
@@ -114,8 +204,9 @@ async function openFile(file: File) {
       color.add(new Option(field.name, String(field.id)))
       instanceField.add(new Option(field.name, String(field.id)))
     }
-    color.value = dataset.hasRgb ? 'rgb' : 'grey'
-    element('scale-control').hidden = true
+    color.value = intensity ? String(intensity.id) : dataset.hasRgb ? 'rgb' : 'grey'
+    scale.value = 'gradient'
+    element('scale-control').hidden = !intensity
     element('dataset').textContent = dataset.name
     element('point-count').textContent = counts.format(dataset.pointCount) + ' points'
     element('empty').hidden = true
@@ -201,7 +292,10 @@ async function selectPoint(x: number, y: number) {
       clearSelection('This point has no label')
       return
     }
-    viewport.highlight(selection.group)
+    if (activeGroup !== selection.group) clearLasso()
+    activeGroup = selection.group
+    lassoTree.disabled = false
+    viewport.highlight(activeGroup)
     element('selected-label').textContent = 'Instance ' + selection.label
     element('selected-count').textContent = counts.format(selection.pointCount) + ' points'
     requestAnimationFrame(() => performance.measure('cloud-click-to-highlight', { start, end: performance.now() }))

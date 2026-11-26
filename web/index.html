@@ -17,6 +17,15 @@
       <div id="empty" class="empty">
         <p>Open a LAS or LAZ file to inspect its points.</p>
       </div>
+      <div id="pivot-crosshair" class="pivot-crosshair" aria-hidden="true" hidden></div>
+      <div id="frame-rate" class="frame-rate" hidden>
+        <p id="frame-rate-label"></p>
+        <div class="frame-rate-chart" aria-hidden="true">
+          <span id="frame-rate-scale"></span>
+          <div id="frame-rate-bars" class="frame-rate-bars"></div>
+          <span>0</span>
+        </div>
+      </div>
       <button id="reset" class="reset" type="button" disabled>Reset view</button>
       <div id="status" class="status" role="status"></div>
     </section>
@@ -46,6 +55,17 @@
           <p id="selected-label">No instance selected</p>
           <p id="selected-count" class="muted"></p>
         </div>
+      </section>
+      <section>
+        <h2>Point selection</h2>
+        <div class="lasso-actions">
+          <button id="lasso" type="button" aria-pressed="false" aria-keyshortcuts="X" disabled>Lasso <kbd aria-hidden="true">X</kbd></button>
+          <button id="clear-lasso" type="button" aria-keyshortcuts="C" disabled>Clear <kbd aria-hidden="true">C</kbd></button>
+        </div>
+        <label class="lasso-filter"><input id="lasso-tree" type="checkbox" aria-keyshortcuts="A" disabled> Active tree only <kbd aria-hidden="true">A</kbd></label>
+        <p class="muted">Left-click vertices. Right-click to finish and select through depth.</p>
+        <button id="finish-lasso" type="button" hidden disabled>Finish</button>
+        <p id="lasso-count" class="lasso-count" aria-live="polite">No points selected</p>
       </section>
     </aside>
   </main>
